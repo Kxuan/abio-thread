@@ -5,7 +5,6 @@
 #ifndef PROJECT_EVENT_NODE_H
 #define PROJECT_EVENT_NODE_H
 
-#include <setjmp.h>
 #include <sys/epoll.h>
 #include "libab_thread.h"
 
