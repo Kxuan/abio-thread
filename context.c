@@ -46,7 +46,6 @@ static void abio_once() {
         fprintf(stderr, "abio not initialized\n");
         abort();
     }
-
     ready = epoll_wait(abio_pollfd, events, EPOLL_EVENT_MAX, -1);
     if (ready == 0) {
         //Timeout
@@ -86,6 +85,7 @@ int main() {
     }
     event_node_init(abio_pollfd);
     test_main();
+    abio_loop();
     event_node_fini();
     return 0;
 }
