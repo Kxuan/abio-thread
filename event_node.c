@@ -56,7 +56,7 @@ static int event_node_new(int fd, int event) {
     abio_event_node_t *node = (abio_event_node_t *) malloc(sizeof(abio_event_node_t));
     node->fd = fd;
     node->next = NULL;
-    node->event_mask = event | EPOLLET | EPOLLONESHOT;
+    node->event_mask = event | EPOLLONESHOT;
     tail->next = node;
     tail = node;
     return event_node_jmp_ctl(ffs(event) - 1, EPOLL_CTL_ADD, node);
