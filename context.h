@@ -7,9 +7,10 @@
 
 void abio_loop();
 
-ucontext_t * abio_context_get_current(void);
-ucontext_t * abio_context_get_global(void);
+ucontext_t *abio_context_get_current(void);
 
+ucontext_t *abio_context_get_global(void);
+int abio_context_is_global(void);
 int abio_context_swap(ucontext_t *ucp);
 
 int abio_context_swap_to_global(ucontext_t *ucp);

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <ucontext.h>
+#include <assert.h>
 #include "event_node.h"
 #include "test.h"
 
@@ -24,18 +25,25 @@ ucontext_t *abio_context_get_global(void) {
     return &global_context;
 }
 
+/* swap current context with {ucp} context */
 int abio_context_swap(ucontext_t *ucp) {
+    assert(ucp != current_context);
+
     ucontext_t *oucp = current_context;
     current_context = ucp;
     return swapcontext(oucp, ucp);
 }
 
 int abio_context_swap_to_global(ucontext_t *ucp) {
+    assert(current_context != &global_context);
+
     current_context = &global_context;
     return swapcontext(ucp, &global_context);
 }
 
 int abio_context_swap_from_global(ucontext_t *ucp) {
+    assert(current_context == &global_context);
+
     current_context = ucp;
     return swapcontext(&global_context, ucp);
 }
@@ -49,7 +57,7 @@ static void abio_once() {
     ready = epoll_wait(abio_pollfd, events, EPOLL_EVENT_MAX, -1);
     if (ready == 0) {
         //Timeout
-        fprintf(stderr, "epoll_wait TIMEOUT\n");
+        fprintf(stderr, "epoll_wait TIMEOUT(shenme gui)\n");
         abort();
     } else if (ready < 0) {
         switch (errno) {
@@ -73,7 +81,7 @@ static void abio_once() {
 void abio_loop() {
     while (!event_node_empty()) {
         abio_once();
-        ab_thread_cleanup();
+        ab_thread_run();
     }
 }
 
@@ -84,8 +92,16 @@ int main() {
         return 1;
     }
     event_node_init(abio_pollfd);
+    ab_thread_init();
+
     test_main();
     abio_loop();
+
+    ab_thread_fini();
     event_node_fini();
     return 0;
+}
+
+int abio_context_is_global(void) {
+    return current_context == &global_context;
 }
