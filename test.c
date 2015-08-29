@@ -13,6 +13,14 @@
 static void *thread_echo(void *arg) {
     char buff[1024];
     ssize_t retsize;
+
+    //TODO we need a new function abio_manage() to do this
+    int fl;
+    fl = fcntl(STDIN_FILENO, F_GETFL);
+    fcntl(STDIN_FILENO, F_SETFL, fl | O_NONBLOCK);
+    fl = fcntl(STDOUT_FILENO, F_GETFL);
+    fcntl(STDOUT_FILENO, F_SETFL, fl | O_NONBLOCK);
+
     while ((retsize = ab_read(STDIN_FILENO, buff, 1024)) > 0) {
         ab_write(STDOUT_FILENO, buff, (size_t) retsize);
     }

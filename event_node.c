@@ -88,6 +88,7 @@ int event_node_set(int fd, enum EPOLL_EVENTS event) {
     for (current_node = head.next; current_node != NULL; current_node = current_node->next) {
         if (current_node->fd == fd) {
             if ((current_node->event_mask & event) != 0) {
+                //FIXME Queue request
                 return -EAGAIN;
             } else {
                 current_node->event_mask |= event;
