@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include "event_node.h"
 #include "context.h"
-
+#define EPOLL_DEFAULT_FLAG (EPOLLET | EPOLLONESHOT)
 static abio_event_node_t head, *tail = &head;
 static int epoll_fd;
 
@@ -56,7 +56,7 @@ static int event_node_new(int fd, int event) {
     abio_event_node_t *node = (abio_event_node_t *) malloc(sizeof(abio_event_node_t));
     node->fd = fd;
     node->next = NULL;
-    node->event_mask = event | EPOLLONESHOT;
+    node->event_mask = event | EPOLL_DEFAULT_FLAG;
     tail->next = node;
     tail = node;
     return event_node_jmp_ctl(ffs(event) - 1, EPOLL_CTL_ADD, node);
@@ -111,7 +111,7 @@ void event_node_raise(uint32_t event, abio_event_node_t *node) {
         }
         event &= ~mask;
     }
-    if (node->event_mask != (EPOLLET | EPOLLONESHOT)) {
+    if (node->event_mask != EPOLL_DEFAULT_FLAG) {
         //If event_mask is not empty, re-active it
         event_node_mod(node);
     } else {

@@ -187,7 +187,7 @@ void ab_thread_run() {
         }
         thread = NULL;
 
-        abt_free(&table_dead);
+        abt_free(table_dead.next);
         abt_init(&table_dead);
     }
     //cleanup tables

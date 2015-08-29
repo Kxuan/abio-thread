@@ -23,6 +23,8 @@ static void *thread_echo(void *arg) {
 
     while ((retsize = ab_read(STDIN_FILENO, buff, 1024)) > 0) {
         ab_write(STDOUT_FILENO, buff, (size_t) retsize);
+        if (strcmp(buff, "exit\n") == 0)
+            break;
     }
     return arg;
 }
@@ -34,12 +36,12 @@ static void *thread_copy(void *arg) {
     fdin = open("/dev/random", O_RDONLY | O_NONBLOCK);
     if (fdin < 0) {
         perror("/dev/random.");
-        goto out_urandom;
+        goto out_open_fdin;
     }
     fdout = open("/dev/zero", O_WRONLY | O_NONBLOCK);
     if (fdout < 0) {
         perror("/dev/zero");
-        goto out_zero;
+        goto out_open_fdout;
     }
 
     ssize_t retsize;
@@ -49,9 +51,10 @@ static void *thread_copy(void *arg) {
         fprintf(stderr, "Copied %u bytes\n", copy_count);
     }
 
-    out_zero:
+    close(fdout);
+    out_open_fdout:
     close(fdin);
-    out_urandom:
+    out_open_fdin:
     if (retsize) {
         fprintf(stderr, "thread_copy exited (Error:%s)\n", strerror(-(int) retsize));
     }
