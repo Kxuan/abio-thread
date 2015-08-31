@@ -5,16 +5,14 @@
 #ifndef PROJECT_LOOP_H
 #define PROJECT_LOOP_H
 
-void abio_loop();
+ucontext_t *abcontext_get_current(void);
 
-ucontext_t *abio_context_get_current(void);
+ucontext_t *abcontext_get_master(void);
+int abcontext_is_master(void);
+int abcontext_switch(ucontext_t *ucp);
 
-ucontext_t *abio_context_get_global(void);
-int abio_context_is_global(void);
-int abio_context_swap(ucontext_t *ucp);
+int abcontext_switch_to_master(ucontext_t *ucp);
 
-int abio_context_swap_to_global(ucontext_t *ucp);
-
-int abio_context_swap_from_global(ucontext_t *ucp);
+int abcontext_switch_from_master(ucontext_t *ucp);
 
 #endif //PROJECT_LOOP_H

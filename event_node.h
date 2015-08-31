@@ -10,19 +10,23 @@
 
 typedef struct abio_event_node_s {
     int fd;
-    int event_mask;
-    abthread_t *context[32];
+    unsigned event_mask;
+    ucontext_t *context[32];
     struct abio_event_node_s *next;
 } abio_event_node_t;
 
-int event_node_init(int epoll_fd);
+int abevent_init();
 
-void event_node_fini(void);
+void abevent_fini(void);
 
 int event_node_set(int fd, enum EPOLL_EVENTS event);
 
 void event_node_raise(uint32_t event, abio_event_node_t *node);
-int event_node_clean_thread(abthread_t *);
+
+int abevent_clear_context(ucontext_t *);
+
 int event_node_empty(void);
+
+void abevent_loop();
 
 #endif //PROJECT_EVENT_NODE_H

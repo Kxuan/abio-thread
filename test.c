@@ -7,25 +7,95 @@
 #include <fcntl.h>
 #include <string.h>
 #include <stdint.h>
+#include <errno.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <stdlib.h>
 #include "libab_thread.h"
 #include "libab.h"
 
-static void *thread_echo(void *arg) {
+static int do_echo(int fdin, int fdout) {
     char buff[1024];
     ssize_t retsize;
 
-    //TODO we need a new function abio_manage() to do this
-    int fl;
-    fl = fcntl(STDIN_FILENO, F_GETFL);
-    fcntl(STDIN_FILENO, F_SETFL, fl | O_NONBLOCK);
-    fl = fcntl(STDOUT_FILENO, F_GETFL);
-    fcntl(STDOUT_FILENO, F_SETFL, fl | O_NONBLOCK);
-
-    while ((retsize = ab_read(STDIN_FILENO, buff, 1024)) > 0) {
-        ab_write(STDOUT_FILENO, buff, (size_t) retsize);
+    while ((retsize = ab_read(fdin, buff, 1024)) > 0) {
+        ab_write(fdout, buff, (size_t) retsize);
         if (strcmp(buff, "exit\n") == 0)
             break;
     }
+    if (retsize == -1)
+        return errno;
+    else
+        return 0;
+}
+
+static void *thread_console(void *arg) {
+    if (ab_manage(STDIN_FILENO) == -1 || ab_manage(STDOUT_FILENO) == -1)
+        return (void *) (intptr_t) errno;
+
+    do_echo(STDIN_FILENO, STDOUT_FILENO);
+    exit(0);
+}
+
+static void *thread_tcp_handler(void *v_fd) {
+    int fd = (int) (intptr_t) v_fd,
+            rc;
+    struct sockaddr_in addr;
+    socklen_t addr_len = sizeof(struct sockaddr_in);
+    char addr_text[20] = {0};
+
+    rc = getpeername(fd, (struct sockaddr *) &addr, &addr_len);
+    inet_ntop(AF_INET, &addr.sin_addr, addr_text, sizeof(addr_text));
+
+    printf("[%s]Connected\n", addr_text);
+    if (rc < 0) {
+        fprintf(stderr, "Fail to getpeername on %d\n", fd);
+        return (void *) (intptr_t) errno;
+    }
+
+    rc = do_echo(fd, fd);
+
+    ab_shutdown(fd, SHUT_RDWR);
+    ab_close(fd);
+    fprintf(stdout, "[%s]Disconnected\n", addr_text);
+    return (void *) (intptr_t) rc;
+}
+
+static void *thread_tcp(void *arg) {
+    int listener, child;
+    int rc;
+    struct sockaddr_in addr;
+    socklen_t addr_len;
+
+    listener = ab_socket(AF_INET, SOCK_STREAM, 0);
+    if (listener < 0) {
+        perror("ab_socket");
+        goto fail_socket;
+    }
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(1802);
+
+    rc = ab_bind(listener, (const struct sockaddr *) &addr, sizeof(addr));
+    if (rc < 0) {
+        perror("ab_bind");
+        goto fail_bind;
+    }
+    rc = ab_listen(listener, 50);
+    if (rc < 0) {
+        perror("ab_listen");
+        goto fail_listen;
+    }
+    while ((child = ab_accept(listener, (struct sockaddr *) &addr, &addr_len)) >= 0) {
+        ab_thread_create(thread_tcp_handler, (void *) (intptr_t) child);
+    }
+
+    fail_listen:
+    fail_bind:
+    ab_close(listener);
+    fail_socket:
+    fprintf(stderr, "thread_tcp() exit\n");
     return arg;
 }
 
@@ -63,6 +133,7 @@ static void *thread_copy(void *arg) {
 
 int test_main() {
     ab_thread_create(thread_copy, (void *) 2);
-    ab_thread_create(thread_echo, (void *) 1);
+    ab_thread_create(thread_console, (void *) 1);
+    ab_thread_create(thread_tcp, (void *) 3);
     return 0;
 }

@@ -6,18 +6,28 @@
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
+#include <assert.h>
 #include "event_node.h"
 #include "context.h"
+
+#define EPOLL_EVENT_MAX 100
+static struct epoll_event epoll_events[EPOLL_EVENT_MAX];
+
 #define EPOLL_DEFAULT_FLAG (EPOLLET | EPOLLONESHOT)
+
 static abio_event_node_t head, *tail = &head;
 static int epoll_fd;
 
-int event_node_init(int v_epoll_fd) {
-    epoll_fd = v_epoll_fd;
+int abevent_init() {
+    epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+    if (epoll_fd < 0) {
+        perror("epoll_create");
+        return 1;
+    }
     return 0;
 }
 
-void event_node_fini(void) {
+void abevent_fini(void) {
     abio_event_node_t *current = head.next, *next;
     head.next = NULL;
     while (current) {
@@ -27,16 +37,15 @@ void event_node_fini(void) {
     }
 }
 
-static int event_node_jmp_ctl(int idx, int op, abio_event_node_t *node) {
+static int event_schedule(int idx, int op, abio_event_node_t *node) {
     struct epoll_event e = {
             .data.ptr=node,
             .events=(uint32_t) node->event_mask
     };
     if (epoll_ctl(epoll_fd, op, node->fd, &e) != 0)
         return -errno;
-    node->context[idx] = ab_thread_current();
-    if (abio_context_swap_to_global(&node->context[idx]->context) != 0)
-        return -errno;
+    node->context[idx] = abcontext_get_current();
+    ab_thread_wait_io();
     return 0;
 }
 
@@ -51,15 +60,17 @@ static int event_node_mod(abio_event_node_t *node) {
     return 0;
 }
 
-static int event_node_new(int fd, int event) {
-    //TODO Optimise.
+static int event_node_new(int fd, unsigned event) {
+    int rc;
     abio_event_node_t *node = (abio_event_node_t *) malloc(sizeof(abio_event_node_t));
     node->fd = fd;
     node->next = NULL;
     node->event_mask = event | EPOLL_DEFAULT_FLAG;
     tail->next = node;
     tail = node;
-    return event_node_jmp_ctl(ffs(event) - 1, EPOLL_CTL_ADD, node);
+    rc = event_schedule(ffs(event) - 1, EPOLL_CTL_ADD, node);
+    node->event_mask &= ~event;
+    return rc;
 }
 
 static int event_node_del(abio_event_node_t *node) {
@@ -83,6 +94,7 @@ int event_node_set(int fd, enum EPOLL_EVENTS event) {
     if (idx == 0)
         return -EINVAL;
     --idx;
+    int rc;
 
     abio_event_node_t *current_node;
     for (current_node = head.next; current_node != NULL; current_node = current_node->next) {
@@ -92,7 +104,9 @@ int event_node_set(int fd, enum EPOLL_EVENTS event) {
                 return -EAGAIN;
             } else {
                 current_node->event_mask |= event;
-                return event_node_jmp_ctl(idx, EPOLL_CTL_MOD, current_node);
+                rc = event_schedule(idx, EPOLL_CTL_MOD, current_node);
+                current_node->event_mask &= ~event;
+                return rc;
             }
         }
     }
@@ -100,14 +114,15 @@ int event_node_set(int fd, enum EPOLL_EVENTS event) {
 }
 
 void event_node_raise(uint32_t event, abio_event_node_t *node) {
+    assert(abcontext_is_master());
+
     int idx;
     uint32_t mask;
     while (event) {
         idx = ffs(event) - 1;
         mask = 1u << idx;
         if (node->event_mask & mask) {
-            node->event_mask &= ~mask;
-            abio_context_swap_from_global(&node->context[idx]->context);
+            abcontext_switch_from_master(node->context[idx]);
         }
         event &= ~mask;
     }
@@ -124,7 +139,7 @@ int event_node_empty(void) {
     return head.next == NULL;
 }
 
-int event_node_clean_thread(abthread_t *thread) {
+int abevent_clear_context(ucontext_t *context) {
     abio_event_node_t *current_node;
     int is_changed, event_mask, idx, mask, ret;
     for (current_node = head.next; current_node != NULL; current_node = current_node->next) {
@@ -133,7 +148,7 @@ int event_node_clean_thread(abthread_t *thread) {
         while (event_mask) {
             idx = ffs(event_mask) - 1;
             mask = ~(1 << idx);
-            if (current_node->context[idx] == thread) {
+            if (current_node->context[idx] == context) {
                 current_node->event_mask &= mask;
                 current_node->context[idx] = NULL;
                 is_changed = 1;
@@ -149,3 +164,44 @@ int event_node_clean_thread(abthread_t *thread) {
     }
     return 0;
 }
+
+static void abevent_once() {
+    int ready, i;
+    if (epoll_fd < 0) {
+        fprintf(stderr, "abevent not initialized\n");
+        abort();
+    }
+    ready = epoll_wait(epoll_fd, epoll_events, EPOLL_EVENT_MAX, -1);
+    if (ready == 0) {
+        //Timeout
+        fprintf(stderr, "epoll_wait TIMEOUT(shenme gui)\n");
+        abort();
+    } else if (ready < 0) {
+        switch (errno) {
+            case EINTR:
+                fprintf(stderr, "interrupted by signal\n");
+                return;
+            case EBADF:
+            case EFAULT:
+            case EINVAL:
+            default:
+                perror("epoll_wait");
+                abort();
+        }
+    } else {
+        for (i = 0; i < ready; ++i) {
+            event_node_raise(epoll_events[i].events, epoll_events[i].data.ptr);
+        }
+    }
+}
+
+void abevent_loop() {
+    assert(abcontext_is_master());
+
+    ab_thread_run();
+    while (!event_node_empty()) {
+        abevent_once();
+        ab_thread_run();
+    }
+}
+

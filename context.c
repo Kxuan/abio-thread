@@ -11,22 +11,18 @@
 #include "event_node.h"
 #include "test.h"
 
-#define EPOLL_EVENT_MAX 100
+static ucontext_t master_context, *current_context = &master_context;
 
-static int abio_pollfd = -1;
-static struct epoll_event events[EPOLL_EVENT_MAX];
-static ucontext_t global_context, *current_context = &global_context;
-
-ucontext_t *abio_context_get_current(void) {
+ucontext_t *abcontext_get_current(void) {
     return current_context;
 }
 
-ucontext_t *abio_context_get_global(void) {
-    return &global_context;
+ucontext_t *abcontext_get_master(void) {
+    return &master_context;
 }
 
 /* swap current context with {ucp} context */
-int abio_context_swap(ucontext_t *ucp) {
+int abcontext_switch(ucontext_t *ucp) {
     assert(ucp != current_context);
 
     ucontext_t *oucp = current_context;
@@ -34,74 +30,34 @@ int abio_context_swap(ucontext_t *ucp) {
     return swapcontext(oucp, ucp);
 }
 
-int abio_context_swap_to_global(ucontext_t *ucp) {
-    assert(current_context != &global_context);
+int abcontext_switch_to_master(ucontext_t *ucp) {
+    assert(current_context != &master_context);
 
-    current_context = &global_context;
-    return swapcontext(ucp, &global_context);
+    current_context = &master_context;
+    return swapcontext(ucp, &master_context);
 }
 
-int abio_context_swap_from_global(ucontext_t *ucp) {
-    assert(current_context == &global_context);
+int abcontext_switch_from_master(ucontext_t *ucp) {
+    assert(current_context == &master_context);
 
     current_context = ucp;
-    return swapcontext(&global_context, ucp);
+    return swapcontext(&master_context, ucp);
 }
 
-static void abio_once() {
-    int ready, i;
-    if (abio_pollfd < 0) {
-        fprintf(stderr, "abio not initialized\n");
-        abort();
-    }
-    ready = epoll_wait(abio_pollfd, events, EPOLL_EVENT_MAX, -1);
-    if (ready == 0) {
-        //Timeout
-        fprintf(stderr, "epoll_wait TIMEOUT(shenme gui)\n");
-        abort();
-    } else if (ready < 0) {
-        switch (errno) {
-            case EINTR:
-                fprintf(stderr, "interrupted by signal\n");
-                return;
-            case EBADF:
-            case EFAULT:
-            case EINVAL:
-            default:
-                perror("epoll_wait");
-                abort();
-        }
-    } else {
-        for (i = 0; i < ready; ++i) {
-            event_node_raise(events[i].events, events[i].data.ptr);
-        }
-    }
-}
-
-void abio_loop() {
-    while (!event_node_empty()) {
-        abio_once();
-        ab_thread_run();
-    }
+int abcontext_is_master(void) {
+    return current_context == &master_context;
 }
 
 int main() {
-    abio_pollfd = epoll_create1(EPOLL_CLOEXEC);
-    if (abio_pollfd < 0) {
-        perror("epoll_create");
-        return 1;
-    }
-    event_node_init(abio_pollfd);
+    if (abevent_init())
+        exit(1);
     ab_thread_init();
 
     test_main();
-    abio_loop();
+    abevent_loop();
 
     ab_thread_fini();
-    event_node_fini();
+    abevent_fini();
     return 0;
 }
 
-int abio_context_is_global(void) {
-    return current_context == &global_context;
-}
